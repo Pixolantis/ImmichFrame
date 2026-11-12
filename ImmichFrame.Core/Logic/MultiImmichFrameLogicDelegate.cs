@@ -33,6 +33,28 @@ public class MultiImmichFrameLogicDelegate : IImmichFrameLogic, IDisposable
     public async Task<IEnumerable<AssetResponseDto>> GetAssets()
         => (await _accountSelectionStrategy.GetAssets()).Shuffle().Select(it => it.ToAsset());
 
+    public async Task<IReadOnlyList<OrderedAsset>> GetOrderedAssets(ImageOrder order, string? position)
+    {
+        IReadOnlyList<(IAccountImmichFrameLogic, OrderedAsset)> assets;
+        try
+        {
+            assets = await _accountSelectionStrategy.GetOrderedAssets(order, position);
+        }
+        catch (ApiException ex) when (position != null && ex.StatusCode == 400)
+        {
+            _logger.LogWarning(ex, "Could not continue at the requested position, starting over");
+            assets = [];
+        }
+
+        // Nothing left after the position: the end was reached, so start over.
+        if (assets.Count == 0 && position != null)
+        {
+            assets = await _accountSelectionStrategy.GetOrderedAssets(order, null);
+        }
+
+        return assets.Select(it => it.Item2 with { Asset = it.Item2.Asset.WithAccount(it.Item1) }).ToList();
+    }
+
 
     public Task<AssetResponseDto> GetAssetInfoById(Guid assetId)
         => _accountSelectionStrategy.ForAsset(assetId, async logic => (await logic.GetAssetInfoById(assetId)).WithAccount(logic));

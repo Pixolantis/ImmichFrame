@@ -44,6 +44,13 @@ export const generalSections: SectionDef[] = [
 			},
 			{ key: 'layout', label: 'Layout', type: 'select', options: ['single', 'splitview'] },
 			{
+				key: 'imageOrder',
+				label: 'Image order',
+				type: 'select',
+				options: ['Random', 'CaptureDateAscending', 'CaptureDateDescending'],
+				help: 'Add ?order=<value> to the frame URL to override it for one frame.'
+			},
+			{
 				key: 'style',
 				label: 'Style',
 				type: 'select',

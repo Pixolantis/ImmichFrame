@@ -117,6 +117,8 @@ General:
   PlayAudio: false # boolean
   # Allow two portrait images to be displayed next to each other
   Layout: "splitview" # single | splitview
+  # Order in which images are shown. Override it per frame with `?order=<value>`.
+  ImageOrder: "Random" # Random | CaptureDateAscending | CaptureDateDescending
 
 # multiple accounts permitted
 Accounts:
@@ -175,6 +177,12 @@ For tags, use the full hierarchical path (the `value` field) as it appears in Im
 
 - `"Vacation"` - matches a top-level tag named "Vacation"
 - `"Travel/Europe"` - matches a tag "Europe" under parent "Travel"
+
+### Image Order
+
+`ImageOrder` sets the order in which images are shown: `Random`, `CaptureDateAscending` (oldest first) or `CaptureDateDescending` (newest first). To use a different order on one frame, add `?order=CaptureDateAscending` to your ImmichFrame-URL.
+
+With a capture date order, reloading the frame starts again from the first image, and at the end of your library it starts over. Memories are still mixed in at random; accounts that only show memories are skipped. Native apps that don't support this, such as the Apple TV app, keep showing the first images, so leave `ImageOrder` on `Random` if you use them.
 
 ### Weather
 

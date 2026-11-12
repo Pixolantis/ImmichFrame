@@ -2,6 +2,7 @@ using ImmichFrame.Core.Api;
 using ImmichFrame.Core.Helpers;
 using ImmichFrame.Core.Interfaces;
 using ImmichFrame.Core.Logic.Pool;
+using ImmichFrame.Core.Models;
 using Moq;
 using NUnit.Framework;
 
@@ -252,6 +253,67 @@ public class AccountSearchPoolTests
         Assert.That(await pool.GetAssetCount(), Is.EqualTo(7));
 
         _api.Verify(a => a.SearchAssetStatisticsAsync(It.IsAny<StatisticsSearchDto>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    private static AssetResponseDto Asset() => new() { Id = Guid.NewGuid() };
+
+    private void SetupPage(string? cursor, IEnumerable<AssetResponseDto> items, string? nextCursor)
+    {
+        _api.Setup(a => a.SearchAssetsAsync(It.IsAny<string>(), It.IsAny<string>(), It.Is<MetadataSearchDto>(dto => dto.Cursor == cursor), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SearchResponseDto { Assets = new SearchAssetResponseDto { Items = items.ToList(), NextCursor = nextCursor } });
+    }
+
+    [Test]
+    public async Task GetSortedAssets_SearchesByCaptureDate()
+    {
+        var assets = new[] { Asset(), Asset() };
+        SetupPage(null, assets, null);
+
+        var result = await _pool.GetSortedAssets(5, AssetOrder.Desc, null);
+
+        Assert.That(result.Select(r => r.Asset), Is.EqualTo(assets));
+        _api.Verify(a => a.SearchAssetsAsync(It.IsAny<string>(), It.IsAny<string>(), It.Is<MetadataSearchDto>(dto =>
+            dto.OrderBy.Field == SearchOrderField.FileCreatedAt &&
+            dto.OrderBy.Direction == AssetOrder.Desc &&
+            dto.WithExif == true &&
+            dto.Filter.TrashedAt != null), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Test]
+    public async Task GetSortedAssets_ContinuesOnNextPageWithPositions()
+    {
+        var first = new[] { Asset(), Asset() };
+        var second = new[] { Asset(), Asset() };
+        SetupPage(null, first, "page2");
+        SetupPage("page2", second, null);
+
+        var result = await _pool.GetSortedAssets(4, AssetOrder.Asc, null);
+
+        Assert.Multiple(() =>
+        {
+            Assert.That(result.Select(r => r.Asset), Is.EqualTo(first.Concat(second)));
+            Assert.That(result.Select(r => r.PositionAfter), Is.EqualTo(new[] { "1:", "0:page2", "1:page2", OrderedAsset.EndPosition }));
+        });
+    }
+
+    [Test]
+    public async Task GetSortedAssets_ResumesAtPosition()
+    {
+        var page = new[] { Asset(), Asset(), Asset() };
+        SetupPage("page2", page, null);
+
+        var result = await _pool.GetSortedAssets(5, AssetOrder.Asc, "1:page2");
+
+        Assert.That(result.Select(r => r.Asset), Is.EqualTo(page.Skip(1)));
+    }
+
+    [Test]
+    public async Task GetSortedAssets_AtEnd_ReturnsNothing()
+    {
+        var result = await _pool.GetSortedAssets(5, AssetOrder.Asc, OrderedAsset.EndPosition);
+
+        Assert.That(result, Is.Empty);
+        _api.Verify(a => a.SearchAssetsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<MetadataSearchDto>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     private void VerifyRandom(Func<RandomSearchDto, bool> match) =>

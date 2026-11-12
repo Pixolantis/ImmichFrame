@@ -27,6 +27,9 @@ namespace ImmichFrame.WebApi.Controllers
         private readonly IImmichFrameLogic _logic;
         private readonly IGeneralSettings _settings;
 
+        // Clients pass this back as `position` to continue an ordered slideshow.
+        public const string NextPositionHeader = "X-Next-Position";
+
         public AssetController(ILogger<AssetController> logger, IImmichFrameLogic logic, IGeneralSettings settings)
         {
             _logger = logger;
@@ -35,11 +38,39 @@ namespace ImmichFrame.WebApi.Controllers
         }
 
         [HttpGet(Name = "GetAssets")]
-        public async Task<List<AssetResponseDto>> GetAssets(string clientIdentifier = "")
+        [ProducesResponseType(typeof(List<AssetResponseDto>), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+        public async Task<ActionResult<List<AssetResponseDto>>> GetAssets(string clientIdentifier = "", string? imageOrder = null, string? position = null)
         {
             var sanitizedClientIdentifier = clientIdentifier.SanitizeString();
             _logger.LogDebug("Assets requested by '{sanitizedClientIdentifier}'", sanitizedClientIdentifier);
-            return (await _logic.GetAssets()).ToList();
+
+            ImageOrder order;
+            if (imageOrder != null)
+            {
+                if (!ImageOrders.TryParse(imageOrder, out order))
+                {
+                    return Problem(detail: $"Unknown order '{imageOrder}'. Use Random, CaptureDateAscending or CaptureDateDescending.", statusCode: StatusCodes.Status400BadRequest);
+                }
+            }
+            else
+            {
+                // A missing or invalid stored value means Random.
+                ImageOrders.TryParse(_settings.ImageOrder, out order);
+            }
+
+            if (order == ImageOrder.Random)
+            {
+                return (await _logic.GetAssets()).ToList();
+            }
+
+            var assets = await _logic.GetOrderedAssets(order, position);
+            if (assets.Count > 0)
+            {
+                Response.Headers[NextPositionHeader] = assets[^1].PositionAfter;
+            }
+
+            return assets.Select(asset => asset.Asset).ToList();
         }
 
         [HttpGet("{id}/AssetInfo", Name = "GetAssetInfo")]

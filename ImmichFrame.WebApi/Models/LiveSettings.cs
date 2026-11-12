@@ -49,6 +49,7 @@ public class LiveGeneralSettings(ISettingsProvider _provider) : IGeneralSettings
     public string Language => Current.Language;
     public List<string> Webcalendars => Current.Webcalendars;
     public int RefreshAlbumPeopleInterval => Current.RefreshAlbumPeopleInterval;
+    public string ImageOrder => Current.ImageOrder;
     public string? WeatherApiKey => Current.WeatherApiKey;
     public string? WeatherLatLong => Current.WeatherLatLong;
     public string? UnitSystem => Current.UnitSystem;

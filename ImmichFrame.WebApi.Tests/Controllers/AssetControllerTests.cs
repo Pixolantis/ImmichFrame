@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Moq.Protected;
 using ImmichFrame.Core.Api;
+using ImmichFrame.WebApi.Controllers;
 using ImmichFrame.WebApi.Models;
 using ImmichFrame.WebApi.Tests.Mocks;
 using ImmichFrame.Core.Interfaces; // Added this back
@@ -19,6 +20,7 @@ namespace ImmichFrame.WebApi.Tests.Controllers
     {
         private WebApplicationFactory<Program> _factory;
         private Mock<HttpMessageHandler> _mockHttpMessageHandler;
+        private string _imageOrder = "Random";
 
         [SetUp]
         public void Setup()
@@ -52,7 +54,8 @@ namespace ImmichFrame.WebApi.Tests.Controllers
                             BaseFontSize = "16px",
                             WeatherApiKey = "",
                             UnitSystem = "imperial",
-                            WeatherLatLong = "0,0"
+                            WeatherLatLong = "0,0",
+                            ImageOrder = _imageOrder
                         };
 
                         var accountSettings = new ServerAccountSettings
@@ -150,6 +153,83 @@ namespace ImmichFrame.WebApi.Tests.Controllers
             // For now, we'll just check if the response is not empty.
             // A more robust check would be to deserialize the response and check the asset ID.
             Assert.That(content, Is.Not.Empty);
+        }
+
+        // Answers /search/statistics and /search/metadata with one asset, recording each /search/metadata request body.
+        private List<string> CaptureMetadataSearches(Guid assetId)
+        {
+            var bodies = new List<string>();
+            var searchJson = JsonSerializer.Serialize(new SearchResponseDto
+            {
+                Assets = new SearchAssetResponseDto { Items = [BuildAssetResponse(assetId)], NextCursor = null }
+            });
+            _mockHttpMessageHandler.Protected()
+                .Setup<Task<HttpResponseMessage>>(
+                    "SendAsync",
+                    ItExpr.Is<HttpRequestMessage>(req => req.RequestUri!.ToString().Contains("/search/metadata")),
+                    ItExpr.IsAny<CancellationToken>()
+                )
+                .Callback<HttpRequestMessage, CancellationToken>((req, _) => bodies.Add(req.Content!.ReadAsStringAsync().Result))
+                .ReturnsAsync(() => new HttpResponseMessage
+                {
+                    StatusCode = HttpStatusCode.OK,
+                    Content = new StringContent(searchJson)
+                });
+            var statsJson = JsonSerializer.Serialize(new SearchStatisticsResponseDto { Total = 1 });
+            _mockHttpMessageHandler.Protected()
+                .Setup<Task<HttpResponseMessage>>(
+                    "SendAsync",
+                    ItExpr.Is<HttpRequestMessage>(req => req.RequestUri!.ToString().Contains("/search/statistics")),
+                    ItExpr.IsAny<CancellationToken>()
+                )
+                .ReturnsAsync(() => new HttpResponseMessage
+                {
+                    StatusCode = HttpStatusCode.OK,
+                    Content = new StringContent(statsJson)
+                });
+            return bodies;
+        }
+
+        [Test]
+        public async Task GetAssets_ImageOrder_SearchesByCaptureDateAndReturnsNextPosition()
+        {
+            var assetId = Guid.NewGuid();
+            var metadataBodies = CaptureMetadataSearches(assetId);
+            var client = _factory.CreateClient();
+
+            var response = await client.GetAsync("/api/Asset?imageOrder=CaptureDateDescending");
+
+            response.EnsureSuccessStatusCode();
+            var content = await response.Content.ReadAsStringAsync();
+            Assert.Multiple(() =>
+            {
+                Assert.That(content, Does.Contain(assetId.ToString()));
+                Assert.That(response.Headers.Contains(AssetController.NextPositionHeader), Is.True);
+                Assert.That(metadataBodies.Single(), Does.Contain("\"direction\":\"desc\""));
+            });
+        }
+
+        [Test]
+        public async Task GetAssets_StoredImageOrder_IsUsedWithoutParameter()
+        {
+            _imageOrder = "CaptureDateAscending";
+            var metadataBodies = CaptureMetadataSearches(Guid.NewGuid());
+            var client = _factory.CreateClient();
+
+            var response = await client.GetAsync("/api/Asset");
+
+            response.EnsureSuccessStatusCode();
+            Assert.That(metadataBodies.Single(), Does.Contain("\"direction\":\"asc\""));
+        }
+
+        [Test]
+        public async Task GetAssets_InvalidImageOrder_ReturnsBadRequest()
+        {
+            var client = _factory.CreateClient();
+
+            var response = await client.GetAsync("/api/Asset?imageOrder=Oldest");
+
+            Assert.That(response.StatusCode, Is.EqualTo(HttpStatusCode.BadRequest));
         }
 
         // Builds a valid AssetResponseDto from the generated client types. Only the

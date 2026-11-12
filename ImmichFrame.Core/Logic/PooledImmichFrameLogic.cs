@@ -12,6 +12,8 @@ public class PooledImmichFrameLogic : IAccountImmichFrameLogic, IDisposable
     private readonly IGeneralSettings _generalSettings;
     private readonly IApiCache _apiCache;
     private readonly IAssetPool _pool;
+    private AccountSearchPool? _searchPool;
+    private MemoryAssetsPool? _memoryPool;
     private readonly ImmichApi _immichApi;
     private readonly string _downloadLocation = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ImageCache");
 
@@ -46,12 +48,14 @@ public class PooledImmichFrameLogic : IAccountImmichFrameLogic, IDisposable
         // Memories-only skips the library search. Every other case needs it.
         if (!accountSettings.ShowMemories || hasSource)
         {
-            pools.Add(new AccountSearchPool(_apiCache, _immichApi, accountSettings));
+            _searchPool = new AccountSearchPool(_apiCache, _immichApi, accountSettings);
+            pools.Add(_searchPool);
         }
 
         if (accountSettings.ShowMemories)
         {
-            pools.Add(new MemoryAssetsPool(_immichApi, accountSettings));
+            _memoryPool = new MemoryAssetsPool(_immichApi, accountSettings);
+            pools.Add(_memoryPool);
         }
 
         return pools.Count == 1 ? pools[0] : new MultiAssetPool(pools);
@@ -65,6 +69,61 @@ public class PooledImmichFrameLogic : IAccountImmichFrameLogic, IDisposable
     public async Task<IEnumerable<AssetResponseDto>> GetAssets()
     {
         return await _pool.GetAssets(25);
+    }
+
+    public async Task<IReadOnlyList<OrderedAsset>> GetOrderedAssets(ImageOrder order, string? position)
+    {
+        // A memories-only account has no library to order; an ended account waits for the next round.
+        if (_searchPool == null || position == OrderedAsset.EndPosition)
+        {
+            return [];
+        }
+
+        var direction = order == ImageOrder.CaptureDateDescending ? AssetOrder.Desc : AssetOrder.Asc;
+        var memoryCount = await CountMemorySlots(25);
+        var sorted = await _searchPool.GetSortedAssets(25 - memoryCount, direction, position);
+        // Empty after a position means this account is through; the caller starts over once all are.
+        if (memoryCount == 0 || (sorted.Count == 0 && position != null))
+        {
+            return sorted;
+        }
+
+        // Memories stay mixed in at random spots and leave the position where it was.
+        var assets = sorted.ToList();
+        foreach (var memory in await _memoryPool!.GetAssets(memoryCount))
+        {
+            assets.Insert(Random.Shared.Next(assets.Count + 1), new OrderedAsset(memory, null, IsMemory: true));
+        }
+
+        // Without library assets the account has nothing more to add to the timeline.
+        var current = sorted.Count == 0 ? OrderedAsset.EndPosition : position;
+        for (var i = 0; i < assets.Count; i++)
+        {
+            if (assets[i].IsMemory)
+            {
+                assets[i] = assets[i] with { PositionAfter = current };
+            }
+            else
+            {
+                current = assets[i].PositionAfter;
+            }
+        }
+
+        return assets;
+    }
+
+    // Same weighting as MultiAssetPool, but at least one slot is left for the library.
+    private async Task<int> CountMemorySlots(int slots)
+    {
+        if (_memoryPool == null)
+        {
+            return 0;
+        }
+
+        var memories = await _memoryPool.GetAssetCount();
+        var total = memories + await _searchPool!.GetAssetCount();
+        var count = total == 0 ? 0 : Enumerable.Range(0, slots).Count(_ => Random.Shared.NextDouble() < (double)memories / total);
+        return Math.Min(count, slots - 1);
     }
 
     public async Task<AssetResponseDto> GetAssetInfoById(Guid assetId) => await _immichApi.GetAssetInfoAsync(assetId, null, null);

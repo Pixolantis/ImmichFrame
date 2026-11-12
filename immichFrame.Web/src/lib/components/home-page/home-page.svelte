@@ -76,6 +76,9 @@
 	let cursorVisible = $state(true);
 
 	const authsecret = page.url.searchParams.get('authsecret');
+	const imageOrder = page.url.searchParams.get('order') || undefined;
+	// Only kept in memory, so reloading the page starts an ordered slideshow from the beginning.
+	let nextPosition: string | undefined;
 
 	if (authsecret && authsecret != $authSecretStore) {
 		authSecretStore.set(authsecret);
@@ -131,24 +134,39 @@
 		});
 	}
 
-	async function loadAssets() {
+	async function loadAssets(epoch: number) {
 		try {
-			let assetRequest = await api.getAssets({ clientIdentifier: $clientIdentifierStore });
+			let assetRequest = await api.getAssets({
+				clientIdentifier: $clientIdentifierStore,
+				imageOrder,
+				position: nextPosition
+			});
+
+			// The transition watchdog started a newer transition meanwhile; its request wins.
+			if (epoch !== transitionEpoch) {
+				return;
+			}
 
 			if (assetRequest.status != 200) {
-				if (assetRequest.status == 401) {
+				// 401 comes from the auth handler.
+				if ((assetRequest.status as number) == 401) {
 					authError = true;
+				} else if (assetRequest.status == 400 && assetRequest.data.detail) {
+					errorMessage = assetRequest.data.detail;
 				}
 				error = true;
 				return;
 			}
 
 			error = false;
+			nextPosition = assetRequest.headers.get('X-Next-Position') ?? undefined;
 			assetBacklog = assetRequest.data.filter(
 				(asset) => isImageAsset(asset) || isVideoAsset(asset)
 			);
 		} catch {
-			error = true;
+			if (epoch === transitionEpoch) {
+				error = true;
+			}
 		}
 	}
 
@@ -190,7 +208,7 @@
 			progressBar.restart(false);
 			$instantTransition = instant;
 			if (previous) await getPreviousAssets();
-			else await getNextAssets();
+			else await getNextAssets(currentEpoch);
 			await tick();
 
 			if (currentEpoch !== transitionEpoch) return;
@@ -215,9 +233,12 @@
 		}
 	};
 
-	async function getNextAssets() {
+	async function getNextAssets(epoch = transitionEpoch) {
 		if (!assetBacklog.length) {
-			await loadAssets();
+			await loadAssets(epoch);
+			if (epoch !== transitionEpoch) {
+				return;
+			}
 		}
 
 		if (!error && !assetBacklog.length) {

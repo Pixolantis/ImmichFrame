@@ -36,7 +36,8 @@
     "ImagePan": true,
     "ImageFill": true,
     "PlayAudio": true,
-    "Layout": "Layout_TEST"
+    "Layout": "Layout_TEST",
+    "ImageOrder": "ImageOrder_TEST"
   },
   "Accounts": [
     {

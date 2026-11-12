@@ -1,5 +1,6 @@
 ﻿using System.Text.Json.Serialization;
 using ImmichFrame.Core.Interfaces;
+using ImmichFrame.Core.Models;
 using YamlDotNet.Serialization;
 
 namespace ImmichFrame.WebApi.Models;
@@ -63,6 +64,7 @@ public class GeneralSettings : IGeneralSettings
     public bool ImageFill { get; set; } = false;
     public bool PlayAudio { get; set; } = false;
     public string Layout { get; set; } = "splitview";
+    public string ImageOrder { get; set; } = "Random";
     public int RenewImagesDuration { get; set; } = 30;
     public List<string> Webcalendars { get; set; } = new();
     public int RefreshAlbumPeopleInterval { get; set; } = 12;
@@ -73,7 +75,13 @@ public class GeneralSettings : IGeneralSettings
     public string? AuthenticationSecret { get; set; }
     public string? AdminPassword { get; set; }
 
-    public void Validate() { }
+    public void Validate()
+    {
+        if (!string.IsNullOrWhiteSpace(ImageOrder) && !ImageOrders.TryParse(ImageOrder, out _))
+        {
+            throw new InvalidOperationException("ImageOrder must be Random, CaptureDateAscending or CaptureDateDescending.");
+        }
+    }
 }
 
 public class ServerAccountSettings : IAccountSettings

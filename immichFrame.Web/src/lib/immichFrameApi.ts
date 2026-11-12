@@ -57,6 +57,7 @@ export type GeneralSettings = {
     imageFill?: boolean;
     playAudio?: boolean;
     layout?: string | null;
+    imageOrder?: string | null;
     renewImagesDuration?: number;
     webcalendars?: string[] | null;
     refreshAlbumPeopleInterval?: number;
@@ -367,14 +368,21 @@ export function testAccount(serverAccountSettings?: ServerAccountSettings, opts?
         body: serverAccountSettings
     }));
 }
-export function getAssets({ clientIdentifier }: {
+export function getAssets({ clientIdentifier, imageOrder, position }: {
     clientIdentifier?: string;
+    imageOrder?: string;
+    position?: string;
 } = {}, opts?: Oazapfts.RequestOpts) {
     return oazapfts.fetchJson<{
         status: 200;
         data: AssetResponseDto[];
+    } | {
+        status: 400;
+        data: ProblemDetails;
     }>(`/api/Asset${QS.query(QS.explode({
-        clientIdentifier
+        clientIdentifier,
+        imageOrder,
+        position
     }))}`, {
         ...opts
     });
